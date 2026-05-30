@@ -150,6 +150,15 @@ def _should_reply_now(scope_key: str) -> bool:
 # ====== PERSISTENCE (users + nextCustomerId) ======
 DATA_DIR = os.getenv("DATA_DIR", "./data")
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Copy default data files if not exists
+import shutil
+for _fname in ["users.json", "admins.json"]:
+    _src = os.path.join("data", _fname)
+    _dst = os.path.join(DATA_DIR, _fname)
+    if not os.path.exists(_dst) and os.path.exists(_src):
+        shutil.copy2(_src, _dst)
+        
 # ====== LAST SETTLE (free backoffice) ======
 LAST_SETTLE_JSON = os.path.join(DATA_DIR, "last_settle_global.json")
 
