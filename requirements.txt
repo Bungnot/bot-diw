@@ -3,3 +3,5 @@ line-bot-sdk
 python-dotenv
 waitress
 requests
+
+gunicorn
