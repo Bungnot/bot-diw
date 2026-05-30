@@ -812,6 +812,9 @@ def start_state():
 
 _profile_cache = {}           # uid -> (display_name, picture_url, ts)
 _PROFILE_CACHE_TTL = int(os.getenv("PROFILE_CACHE_TTL", "300"))  # 5 นาที (ปรับใน .env ได้)
+_NAME_SYNC_TTL = int(os.getenv("NAME_SYNC_TTL", "3600"))  # sync ชื่อ LINE ทุก 1 ชั่วโมง
+_name_sync_ts = {}  # uid -> last sync timestamp
+
 
 def get_profile_display(src, user_id):
     now = time.time()
@@ -2744,6 +2747,21 @@ def on_message(event: MessageEvent):
 
     # cache for unsend monitor
     msgCache[event.message.id] = {"text": (event.message.text or ""), "ts": time.time()}
+
+    # ── auto sync ชื่อ LINE นานๆครั้ง (NAME_SYNC_TTL) ──
+    if uid in users:
+        _now_ts = time.time()
+        if _now_ts - _name_sync_ts.get(uid, 0) > _NAME_SYNC_TTL:
+            _name_sync_ts[uid] = _now_ts
+            try:
+                _new_name, _new_pic = get_profile_display(event.source, uid)
+                if _new_name and _new_name != users[uid].get("name"):
+                    with with_users_lock():
+                        users[uid]["name"] = _new_name
+                        users[uid]["pictureUrl"] = _new_pic
+                    save_users_persist()
+            except Exception:
+                pass
     now = time.time()
     if len(msgCache) > 4000:
         for k, v in list(msgCache.items()):
