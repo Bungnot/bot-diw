@@ -3650,7 +3650,7 @@ def on_message(event: MessageEvent):
         if text == "สกอ":
             peh_key = _peh_source_key(event)
             if not PEH_LIST.get(peh_key):
-                safe_reply(event, TextSendMessage("📋 ยังไม่มีรายการในห้องนี้"))
+                safe_reply(event, TextSendMessage("📋 ยังไม่มีรายการเปะในห้องนี้"))
                 return
             msgs = peh_flex_messages(event)
             if msgs:
@@ -3658,11 +3658,11 @@ def on_message(event: MessageEvent):
             return
 
         # ====== PEH / "เปะ" (เฉพาะแอดมิน) ======
-        if is_admin(uid) and "จึก" in text:
+        if is_admin(uid) and "เปะ" in text:
             peh_lines = text.split("\n")
             added = False
             for peh_line in peh_lines:
-                m_peh = re.match(r"^จึก\s+(.+)$", peh_line.strip())
+                m_peh = re.match(r"^เปะ\s+(.+)$", peh_line.strip())
                 if m_peh:
                     item_text = m_peh.group(1).strip()
                     _add_peh_item(event, item_text)
@@ -3671,6 +3671,28 @@ def on_message(event: MessageEvent):
                 msgs = peh_flex_messages(event)
                 safe_reply(event, msgs[0] if len(msgs) == 1 else msgs[:5])
                 return
+
+        # ====== ลบรายการ PEH ตามหมายเลข (เฉพาะแอดมิน) ======
+        # รูปแบบ: ลบ 3  หรือ  ลบรายการ 3
+        m_peh_del = re.match(r"^ลบ(?:รายการ)?\s+(\d+)$", text.strip())
+        if m_peh_del and is_admin(uid):
+            peh_key = _peh_source_key(event)
+            items = PEH_LIST.get(peh_key, [])
+            del_no = int(m_peh_del.group(1))
+            if not items:
+                safe_reply(event, TextSendMessage("ยังไม่มีรายการเปะในห้องนี้"))
+                return
+            if del_no < 1 or del_no > len(items):
+                safe_reply(event, TextSendMessage(
+                    f"❌ หมายเลขไม่ถูกต้อง (มีทั้งหมด {len(items)} รายการ)"
+                ))
+                return
+            removed = items.pop(del_no - 1)
+            PEH_LIST[peh_key] = items
+            safe_reply(event, TextSendMessage(
+                f"✅ ลบรายการที่ {del_no} แล้ว\n🗑 {removed}"
+            ))
+            return
 
         # ====== ล้างรายการ PEH (เฉพาะแอดมิน) ======
         if text == "ล้างรายการ" and is_admin(uid):
