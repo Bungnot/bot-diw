@@ -618,7 +618,7 @@ PLAY_HELP_COMMANDS = {
 # ====== PEH / เปะ ======
 TARGET_GROUP_NAME = os.getenv(
     "TARGET_GROUP_NAME",
-    "🚀บั้งไฟน้อย • เถ้าแก่น้อย •"
+    "🚀เซิ้งบั้งไฟ V2 •"
 ).strip()
 
 PEH_LIST = {}   # dict[source_key] = ["ข้อความ..."]
@@ -3650,7 +3650,7 @@ def on_message(event: MessageEvent):
         if text == "สกอ":
             peh_key = _peh_source_key(event)
             if not PEH_LIST.get(peh_key):
-                safe_reply(event, TextSendMessage("📋 ยังไม่มีรายการเปะในห้องนี้"))
+                safe_reply(event, TextSendMessage("📋 ยังไม่มีรายการในห้องนี้"))
                 return
             msgs = peh_flex_messages(event)
             if msgs:
@@ -3658,11 +3658,11 @@ def on_message(event: MessageEvent):
             return
 
         # ====== PEH / "เปะ" (เฉพาะแอดมิน) ======
-        if is_admin(uid) and "เปะ" in text:
+        if is_admin(uid) and "จึก" in text:
             peh_lines = text.split("\n")
             added = False
             for peh_line in peh_lines:
-                m_peh = re.match(r"^เปะ\s+(.+)$", peh_line.strip())
+                m_peh = re.match(r"^จึก\s+(.+)$", peh_line.strip())
                 if m_peh:
                     item_text = m_peh.group(1).strip()
                     _add_peh_item(event, item_text)
