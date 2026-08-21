@@ -618,7 +618,7 @@ PLAY_HELP_COMMANDS = {
 # ====== PEH / เปะ ======
 TARGET_GROUP_NAME = os.getenv(
     "TARGET_GROUP_NAME",
-    "🚀เซิ้งบั้งไฟ •"
+    "🚀บั้งไฟน้อย • เถ้าแก่น้อย •"
 ).strip()
 
 PEH_LIST = {}   # dict[source_key] = ["ข้อความ..."]
@@ -2724,11 +2724,68 @@ def _peh_source_key(event):
     )
 
 
+def _peh_extract_name(text: str) -> str:
+    """
+    ดึงส่วน "ชื่อ" ออกจากรายการเปะ โดยตัด emoji สถานะ, ตัวเลขท้าย,
+    และวงเล็บ (n) ที่บอทเติมไว้ออก เพื่อใช้เปรียบเทียบความซ้ำ
+    ตัวอย่าง:
+      "สมชาย 300✅✅"  → "สมชาย"
+      "สมหญิง(2) 500" → "สมหญิง"
+      "เทสระบบ❌"      → "เทสระบบ"
+    """
+    raw = str(text or "").strip()
+    # ลบ emoji สถานะ
+    raw = re.sub(r"[✅❌⛔️\ufe0f]+", "", raw)
+    # ลบตัวเลขท้าย (ยอดเงิน) พร้อม comma
+    raw = re.sub(r"\s+[-+]?\d[\d,]*(?:\.\d+)?\s*$", "", raw)
+    # ลบวงเล็บตัวเลข (n) ที่บอทเติม เช่น (2), (10)
+    raw = re.sub(r"\s*\(\d+\)\s*$", "", raw)
+    return raw.strip()
+
+
 def _add_peh_item(event, text: str):
-    """เพิ่มรายการ PEH ลงในห้อง/กลุ่ม/แชทนั้น ๆ"""
+    """
+    เพิ่มรายการ PEH ลงในห้อง/กลุ่ม/แชทนั้น ๆ
+    ถ้าชื่อซ้ำกับรายการที่มีอยู่แล้ว จะเติม (2), (3), ... ต่อท้ายชื่อ
+    """
     key = _peh_source_key(event)
     if key not in PEH_LIST:
         PEH_LIST[key] = []
+
+    # ดึงชื่อของรายการใหม่
+    new_name = _peh_extract_name(text)
+
+    # นับว่าในรายการปัจจุบัน มีชื่อนี้อยู่กี่ครั้งแล้ว
+    existing_count = sum(
+        1 for item in PEH_LIST[key]
+        if _peh_extract_name(item) == new_name
+    )
+
+    if existing_count > 0:
+        # มีซ้ำ → เติม (n) ต่อท้ายชื่อ โดยไม่แตะส่วนตัวเลข/emoji
+        # หา "จุดแทรก" = ก่อนตัวเลขท้ายหรือ emoji สถานะ
+        # แยกส่วน suffix (ตัวเลข+emoji) ออกจากส่วนชื่อก่อน
+        suffix_match = re.search(
+            r"(\s+[-+]?\d[\d,]*(?:\.\d+)?\s*[✅❌⛔️\ufe0f]*)$",
+            re.sub(r"[✅❌⛔️\ufe0f]+\s*$", lambda m: m.group(), text)
+        )
+        if suffix_match:
+            body = text[:suffix_match.start()]
+            suffix = text[suffix_match.start():]
+        else:
+            # ไม่มีตัวเลขท้าย อาจมีแค่ emoji หรือไม่มีเลย
+            emoji_match = re.search(r"(\s*[✅❌⛔️\ufe0f]+\s*)$", text)
+            if emoji_match:
+                body = text[:emoji_match.start()]
+                suffix = text[emoji_match.start():]
+            else:
+                body = text
+                suffix = ""
+
+        # ลบวงเล็บเก่าออกจาก body (กันกรณีแอดมินพิมพ์ซ้ำพร้อม (n) มาเอง)
+        body = re.sub(r"\s*\(\d+\)\s*$", "", body.rstrip())
+        text = f"{body}({existing_count + 1}){suffix}"
+
     PEH_LIST[key].append(text)
     return PEH_LIST[key]
 
