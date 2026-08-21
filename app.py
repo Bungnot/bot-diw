@@ -615,6 +615,27 @@ PLAY_HELP_COMMANDS = {
     "เล่นแบบใด",
 }
 
+# ====== PEH / เปะ ======
+TARGET_GROUP_NAME = os.getenv(
+    "TARGET_GROUP_NAME",
+    "🚀เซิ้งบั้งไฟ •"
+).strip()
+
+PEH_LIST = {}   # dict[source_key] = ["ข้อความ..."]
+
+# ====== สถานะของรายการ "เปะ" ======
+PEH_STATUS = {
+    "✅": {"key": "win",  "label": "ชนะ"},
+    "❌": {"key": "lose", "label": "แพ้"},
+    "⛔": {"key": "draw", "label": "จาว"},
+}
+
+# จำนวนรายการต่อ 1 หน้าใน Carousel
+PEH_ITEMS_PER_PAGE = 20
+
+# LINE Carousel รองรับสูงสุด 12 bubbles ต่อ 1 carousel
+PEH_MAX_BUBBLES_PER_CAROUSEL = 12
+
 # ===== Debounced Saver =====
 _save_event = threading.Event()
 
@@ -2691,6 +2712,291 @@ def save_score_history_latest(state, round_no, camp, code):
 
 
 
+# ====== PEH HELPERS ======
+def _peh_source_key(event):
+    """คีย์ห้อง/กลุ่มสำหรับ PEH_LIST"""
+    src = event.source
+    return (
+        getattr(src, "group_id", None)
+        or getattr(src, "room_id", None)
+        or getattr(src, "user_id", None)
+        or "global"
+    )
+
+
+def _add_peh_item(event, text: str):
+    """เพิ่มรายการ PEH ลงในห้อง/กลุ่ม/แชทนั้น ๆ"""
+    key = _peh_source_key(event)
+    if key not in PEH_LIST:
+        PEH_LIST[key] = []
+    PEH_LIST[key].append(text)
+    return PEH_LIST[key]
+
+
+def _peh_parse_status(item: str):
+    """
+    อ่านสถานะจาก emoji:
+      ✅ = ชนะ  ❌ = แพ้  ⛔ = จาว
+    กติกา: 1 รายการนับเป็น 1 ผล ยึดชนิดที่ปรากฏก่อนสุด
+    """
+    raw = str(item or "").strip()
+    found = []
+    for symbol in PEH_STATUS:
+        pos = raw.find(symbol)
+        if pos >= 0:
+            found.append((pos, symbol))
+
+    if not found:
+        clean = re.sub(r"\s+", " ", raw).strip()
+        return None, clean
+
+    _, symbol = min(found, key=lambda x: x[0])
+    clean_text = re.sub(r"[✅❌⛔]+", "", raw)
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    symbol_count = min(2, max(1, raw.count(symbol)))
+    display_text = f"{clean_text}{symbol * symbol_count}"
+    return symbol, display_text
+
+
+def _peh_split_row(display_text: str, symbol):
+    """แยกข้อความและตัวเลขสำหรับแสดงในตาราง"""
+    text = str(display_text or "").strip()
+    clean = re.sub(r"[✅❌⛔️\ufe0f]+", "", text)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    m = re.match(r"^(.*?)(?:\s+)([-+]?\d[\d,]*(?:\.\d+)?)$", clean)
+    emoji_text = ""
+    if symbol:
+        count = min(2, max(1, text.count(symbol)))
+        emoji_text = symbol * count
+    if m:
+        left = m.group(1).strip()
+        amount = m.group(2).strip()
+        right = f"{amount}{emoji_text}" if emoji_text else amount
+        return left, right
+    return clean, emoji_text
+
+
+def _peh_build_stats(items):
+    stats = {"win": 0, "lose": 0, "draw": 0}
+    parsed_items = []
+    for item in items:
+        symbol, display_text = _peh_parse_status(item)
+        if symbol:
+            stats[PEH_STATUS[symbol]["key"]] += 1
+        parsed_items.append((display_text, symbol))
+    return stats, parsed_items
+
+
+def _peh_row(number: int, display_text: str, symbol) -> dict:
+    """แถวตารางแบบมือถือ: [ลำดับ] [ชื่อ/ข้อความ] [ตัวเลข + emoji]"""
+    number_color = {
+        "✅": "#15803D",
+        "❌": "#B91C1C",
+        "⛔": "#A16207",
+    }.get(symbol, "#60717C")
+    left_text, right_text = _peh_split_row(display_text, symbol)
+    return {
+        "type": "box",
+        "layout": "horizontal",
+        "paddingTop": "5px",
+        "paddingBottom": "5px",
+        "alignItems": "center",
+        "contents": [
+            {
+                "type": "text", "text": str(number),
+                "size": "xs", "weight": "bold",
+                "color": number_color, "align": "center", "flex": 1,
+            },
+            {
+                "type": "text", "text": left_text,
+                "size": "xs", "color": "#24313A",
+                "wrap": True, "gravity": "center", "flex": 5,
+            },
+            {
+                "type": "text", "text": right_text,
+                "size": "xs", "weight": "bold",
+                "color": "#24313A", "align": "end",
+                "gravity": "center", "flex": 4,
+                "wrap": False, "adjustMode": "shrink-to-fit",
+            },
+        ],
+    }
+
+
+def _peh_page_bubble(page_items, page_no: int, page_total: int, stats: dict, total: int):
+    """1 bubble = 1 หน้า"""
+    rows = []
+    for idx, (display_text, symbol) in enumerate(page_items):
+        global_no = (page_no - 1) * PEH_ITEMS_PER_PAGE + idx + 1
+        rows.append(_peh_row(global_no, display_text, symbol))
+        if idx != len(page_items) - 1:
+            rows.append({"type": "separator", "color": "#EEF2F4"})
+
+    if not rows:
+        rows = [{
+            "type": "text", "text": "ยังไม่มีรายการ",
+            "size": "sm", "color": "#94A3AB",
+            "align": "center", "margin": "lg",
+        }]
+
+    header_contents = [
+        {
+            "type": "box", "layout": "horizontal", "alignItems": "center",
+            "contents": [
+                {
+                    "type": "box", "layout": "vertical",
+                    "width": "5px", "height": "26px",
+                    "cornerRadius": "8px", "backgroundColor": "#62B89B",
+                    "contents": []
+                },
+                {
+                    "type": "box", "layout": "vertical",
+                    "margin": "sm", "flex": 1,
+                    "contents": [
+                        {
+                            "type": "text", "text": "สกอบั้งไฟวันนี้",
+                            "size": "md", "weight": "bold", "color": "#26353D",
+                        },
+                        {
+                            "type": "text",
+                            "text": f"ทั้งหมด {total} รายการ",
+                            "size": "xxs", "color": "#8B989F", "margin": "xs",
+                        },
+                    ]
+                },
+                {
+                    "type": "text",
+                    "text": f"หน้า {page_no}/{page_total}",
+                    "size": "xxs", "color": "#9AA5AB",
+                    "align": "end", "gravity": "center", "flex": 0,
+                },
+            ],
+        }
+    ]
+
+    if page_no == 1:
+        header_contents += [
+            {
+                "type": "box", "layout": "horizontal",
+                "spacing": "sm", "margin": "md",
+                "contents": [
+                    {
+                        "type": "box", "layout": "vertical", "flex": 1,
+                        "cornerRadius": "10px", "backgroundColor": "#F1FAF5",
+                        "paddingAll": "7px",
+                        "contents": [
+                            {"type": "text", "text": "ชนะ", "size": "xxs", "color": "#708078", "align": "center"},
+                            {"type": "text", "text": f"✅ {stats['win']}", "size": "sm", "weight": "bold", "color": "#267A55", "align": "center", "margin": "xs"},
+                        ],
+                    },
+                    {
+                        "type": "box", "layout": "vertical", "flex": 1,
+                        "cornerRadius": "10px", "backgroundColor": "#FFF5F5",
+                        "paddingAll": "7px",
+                        "contents": [
+                            {"type": "text", "text": "แพ้", "size": "xxs", "color": "#857474", "align": "center"},
+                            {"type": "text", "text": f"❌ {stats['lose']}", "size": "sm", "weight": "bold", "color": "#B84A4A", "align": "center", "margin": "xs"},
+                        ],
+                    },
+                    {
+                        "type": "box", "layout": "vertical", "flex": 1,
+                        "cornerRadius": "10px", "backgroundColor": "#FFF9EF",
+                        "paddingAll": "7px",
+                        "contents": [
+                            {"type": "text", "text": "จาว", "size": "xxs", "color": "#837A68", "align": "center"},
+                            {"type": "text", "text": f"⛔ {stats['draw']}", "size": "sm", "weight": "bold", "color": "#9A711F", "align": "center", "margin": "xs"},
+                        ],
+                    },
+                ],
+            }
+        ]
+
+    header_contents.append({
+        "type": "separator", "margin": "md", "color": "#E8EDF0",
+    })
+
+    return {
+        "type": "bubble",
+        "size": "giga",
+        "header": {
+            "type": "box", "layout": "vertical",
+            "backgroundColor": "#FFFFFF",
+            "paddingStart": "14px", "paddingEnd": "14px",
+            "paddingTop": "12px", "paddingBottom": "7px",
+            "contents": header_contents,
+        },
+        "body": {
+            "type": "box", "layout": "vertical",
+            "backgroundColor": "#FFFFFF",
+            "paddingStart": "14px", "paddingEnd": "14px",
+            "paddingTop": "3px", "paddingBottom": "8px",
+            "contents": rows,
+        },
+        "footer": {
+            "type": "box", "layout": "vertical",
+            "backgroundColor": "#FAFBFC", "paddingAll": "6px",
+            "contents": [{
+                "type": "text", "text": TARGET_GROUP_NAME,
+                "size": "xxs", "color": "#98A4AA",
+                "align": "center", "wrap": True,
+            }],
+        },
+    }
+
+
+def peh_flex_messages(event) -> list:
+    """
+    คืนค่าเป็น list ของ FlexSendMessage
+    - 20 รายการ / bubble
+    - สูงสุด 12 bubbles / carousel
+    """
+    key = _peh_source_key(event)
+    items = PEH_LIST.get(key, [])
+    total = len(items)
+    stats, parsed_items = _peh_build_stats(items)
+
+    if not parsed_items:
+        pages = [[]]
+    else:
+        pages = [
+            parsed_items[i:i + PEH_ITEMS_PER_PAGE]
+            for i in range(0, len(parsed_items), PEH_ITEMS_PER_PAGE)
+        ]
+
+    page_total = len(pages)
+    bubbles = [
+        _peh_page_bubble(
+            page_items=page_items,
+            page_no=page_no,
+            page_total=page_total,
+            stats=stats,
+            total=total,
+        )
+        for page_no, page_items in enumerate(pages, start=1)
+    ]
+
+    carousel_groups = [
+        bubbles[i:i + PEH_MAX_BUBBLES_PER_CAROUSEL]
+        for i in range(0, len(bubbles), PEH_MAX_BUBBLES_PER_CAROUSEL)
+    ]
+
+    messages = []
+    for group in carousel_groups:
+        if len(group) == 1:
+            contents = group[0]
+        else:
+            contents = {"type": "carousel", "contents": group}
+        messages.append(FlexSendMessage(
+            alt_text=(
+                f"สกอบั้งไฟวันนี้ • "
+                f"ชนะ {stats['win']} แพ้ {stats['lose']} จาว {stats['draw']} "
+                f"• รวม {total} รายการ"
+            ),
+            contents=contents,
+        ))
+    return messages
+
+
 # ====== MESSAGE HANDLER ======
 @handler.add(MessageEvent, message=TextMessage)
 def on_message(event: MessageEvent):
@@ -3282,6 +3588,39 @@ def on_message(event: MessageEvent):
 
         if text == "กต":
             safe_reply(event, TextSendMessage(rules_text())); return
+
+        # ====== คำสั่ง "สกอ" ดูรายการทั้งหมด ======
+        if text == "สกอ":
+            peh_key = _peh_source_key(event)
+            if not PEH_LIST.get(peh_key):
+                safe_reply(event, TextSendMessage("📋 ยังไม่มีรายการในห้องนี้"))
+                return
+            msgs = peh_flex_messages(event)
+            if msgs:
+                safe_reply(event, msgs[0] if len(msgs) == 1 else msgs[:5])
+            return
+
+        # ====== PEH / "เปะ" (เฉพาะแอดมิน) ======
+        if is_admin(uid) and "จึก" in text:
+            peh_lines = text.split("\n")
+            added = False
+            for peh_line in peh_lines:
+                m_peh = re.match(r"^จึก\s+(.+)$", peh_line.strip())
+                if m_peh:
+                    item_text = m_peh.group(1).strip()
+                    _add_peh_item(event, item_text)
+                    added = True
+            if added:
+                msgs = peh_flex_messages(event)
+                safe_reply(event, msgs[0] if len(msgs) == 1 else msgs[:5])
+                return
+
+        # ====== ล้างรายการ PEH (เฉพาะแอดมิน) ======
+        if text == "ล้างรายการ" and is_admin(uid):
+            peh_key = _peh_source_key(event)
+            PEH_LIST[peh_key] = []
+            safe_reply(event, TextSendMessage("ล้างรายการเรียบร้อย"))
+            return
 
         # ==== ประกาศราคาแบบ "ส่งข้อความอย่างเดียว" (ไม่เปิดรอบ) ====
         # ==== ประกาศราคาแบบ "ส่งข้อความอย่างเดียว" (ไม่เปิดรอบ) ====
