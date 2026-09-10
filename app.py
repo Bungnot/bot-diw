@@ -3527,8 +3527,13 @@ def on_message(event: MessageEvent):
                     target["credit"] = credit_before + amt
                     rooms[key]["funds"][tuid] = fund_before + amt
                     msg = f"✅เติมเครดิต {fmt(amt)} บาท  ID : {cid}  {target['name']}  คงเหลือ {fmt(target['credit'])} บาท"
+                # แก้เป็น
                 else:
-                    target["credit"] = max(credit_before - amt, 0)
+                    if credit_before < amt:
+                        safe_reply(event, TextSendMessage(
+                            f"❌ เครดิตไม่พอ  ID : {cid}  {target['name']}  มีเพียง {fmt(credit_before)} บาท"
+                        )); return
+                    target["credit"] = credit_before - amt
                     rooms[key]["funds"][tuid] = max(fund_before - amt, 0)
                     msg = f"✅ลบเครดิต {fmt(amt)} บาท  ID : {cid}  {target['name']}  คงเหลือ {fmt(target['credit'])} บาท"
 
