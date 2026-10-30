@@ -3505,9 +3505,9 @@ def on_message(event: MessageEvent):
             msg += f"\nคืนเครดิต {fmt(total_refund_sum)} บาท ให้ {total_refund_users} คน"
             safe_reply(event, TextSendMessage(msg)); return
 
-        # ==== เติม/ลบทุน+เครดิต แบบ $+ <cid> <amt> / $- <cid> <amt> ====
-        m_add = re.match(r"^\$\+\s*(\d+)\s+(\d+)$", text)
-        m_sub = re.match(r"^\$-\s*(\d+)\s+(\d+)$", text)
+        # ==== เติม/ลบทุน+เครดิต แบบ +<cid> <amt> / -<cid> <amt> (หรือ $+ / $- แบบเดิม) ====
+        m_add = re.match(r"^\$?\+\s*(\d+)\s+(\d+)$", text)
+        m_sub = re.match(r"^\$?-\s*(\d+)\s+(\d+)$", text)
         if m_add or m_sub:
             if not is_admin(uid):
                 safe_reply(event, TextSendMessage("คำสั่งนี้ใช้ได้เฉพาะแอดมิน")); return
